@@ -3,11 +3,20 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Square, Mic, Video, VideoOff, Send, RotateCcw } from "lucide-react";
+import {
+  Square,
+  Mic,
+  Video,
+  VideoOff,
+  Send,
+  RotateCcw,
+  Loader2,
+} from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 
 export default function VoiceVideoRecorder() {
   const [isRecording, setIsRecording] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioPermission, setAudioPermission] = useState<boolean | null>(null);
@@ -184,7 +193,7 @@ export default function VoiceVideoRecorder() {
 
     mediaRecorder.onstop = () => {
       const audioBlob = new Blob(audioChunksRef.current, {
-        type: "audio/wav",
+        type: "audio/ogg",
       });
       setAudioBlob(audioBlob);
       setHasRecording(true);
@@ -220,6 +229,7 @@ export default function VoiceVideoRecorder() {
 
   const sendRecording = async () => {
     if (!audioBlob) return;
+    setIsRecording(true);
 
     try {
       let imageBlob: Blob | undefined;
@@ -238,14 +248,39 @@ export default function VoiceVideoRecorder() {
         }
       }
 
+      // Log Blob URLs
+      console.log("Audio Blob URL:", URL.createObjectURL(audioBlob));
+      if (imageBlob) {
+        console.log("Image Blob URL:", URL.createObjectURL(imageBlob));
+      }
+
+      // Function to download a file
+      const downloadFile = (blob: Blob, filename: string) => {
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      // Download the files
+      downloadFile(audioBlob, "recording.ogg");
+      if (imageBlob) {
+        downloadFile(imageBlob, "snapshot.jpg");
+      }
+
+      // Simulate sending to backend
       const formData = new FormData();
       formData.append("audio", audioBlob);
       if (imageBlob) {
         formData.append("image", imageBlob);
       }
 
-      console.log("audio file", audioBlob);
-      console.log("image file", imageBlob);
+      console.log("FormData Entries:");
+      for (let [key, value] of formData.entries()) {
+        console.log(key, value);
+      }
 
       const response = await fetch(
         "http://127.0.0.1:8001/user/process_request",
@@ -265,12 +300,14 @@ export default function VoiceVideoRecorder() {
         throw new Error("Failed to send recording");
       }
     } catch (error) {
-      console.error("Error sending recording:", error);
+      console.error("Error preparing recording:", error);
       toast({
         title: "Error",
-        description: "Failed to send recording",
+        description: "Failed to prepare recording",
         variant: "destructive",
       });
+    } finally {
+      setIsRecording(false);
     }
 
     stopAllTracks();
@@ -367,9 +404,16 @@ export default function VoiceVideoRecorder() {
               <Button
                 className="flex-1 bg-[#FF8A00] hover:bg-[#e67e22] text-white"
                 onClick={sendRecording}
+                disabled={isSending}
               >
-                <Send className="h-4 w-4 mr-2" />
-                Send Recording
+                {isSending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+                <span className="ml-2">
+                  {isSending ? "Sending..." : "Send"}
+                </span>
               </Button>
               <Button
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700"
