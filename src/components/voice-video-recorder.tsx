@@ -23,6 +23,7 @@ export default function VoiceVideoRecorder() {
   const [videoPermission, setVideoPermission] = useState<boolean | null>(null);
   const [hasRecording, setHasRecording] = useState(false);
   const [videoActive, setVideoActive] = useState(false);
+  const [responseAudio, setResponseAudio] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -73,6 +74,7 @@ export default function VoiceVideoRecorder() {
     setHasRecording(false);
     setAudioBlob(null);
     audioChunksRef.current = [];
+    setResponseAudio(null);
   };
 
   const requestAudioPermission = async () => {
@@ -138,23 +140,14 @@ export default function VoiceVideoRecorder() {
     if (!audioStream) return;
 
     const videoStream = await requestVideoPermission();
-
-    const combinedStream = new MediaStream();
-    audioStream
-      .getAudioTracks()
-      .forEach((track) => combinedStream.addTrack(track));
-
     if (videoStream) {
-      videoStream
-        .getVideoTracks()
-        .forEach((track) => combinedStream.addTrack(track));
+      videoStreamRef.current = videoStream;
+      setTimeout(() => {
+        ensureVideoDisplay();
+      }, 500);
     }
 
-    streamRef.current = combinedStream;
-
-    setTimeout(() => {
-      ensureVideoDisplay();
-    }, 500);
+    streamRef.current = audioStream;
 
     const audioContext = new AudioContext();
     const audioSource = audioContext.createMediaStreamSource(audioStream);
@@ -181,7 +174,7 @@ export default function VoiceVideoRecorder() {
       }
     };
 
-    const mediaRecorder = new MediaRecorder(combinedStream);
+    const mediaRecorder = new MediaRecorder(audioStream);
     mediaRecorderRef.current = mediaRecorder;
     audioChunksRef.current = [];
 
@@ -193,7 +186,7 @@ export default function VoiceVideoRecorder() {
 
     mediaRecorder.onstop = () => {
       const audioBlob = new Blob(audioChunksRef.current, {
-        type: "audio/ogg",
+        type: "audio/wav", // Changed from ogg to wav to match your implementation
       });
       setAudioBlob(audioBlob);
       setHasRecording(true);
@@ -220,7 +213,7 @@ export default function VoiceVideoRecorder() {
       }
 
       if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach((track) => {
+        streamRef.current.getTracks().forEach((track) => {
           track.stop();
         });
       }
@@ -229,7 +222,7 @@ export default function VoiceVideoRecorder() {
 
   const sendRecording = async () => {
     if (!audioBlob) return;
-    setIsRecording(true);
+    setIsSending(true);
 
     try {
       let imageBlob: Blob | undefined;
@@ -248,12 +241,6 @@ export default function VoiceVideoRecorder() {
         }
       }
 
-      // Log Blob URLs
-      console.log("Audio Blob URL:", URL.createObjectURL(audioBlob));
-      if (imageBlob) {
-        console.log("Image Blob URL:", URL.createObjectURL(imageBlob));
-      }
-
       // Function to download a file
       const downloadFile = (blob: Blob, filename: string) => {
         const link = document.createElement("a");
@@ -264,12 +251,6 @@ export default function VoiceVideoRecorder() {
         document.body.removeChild(link);
       };
 
-      // Download the files
-      downloadFile(audioBlob, "recording.ogg");
-      if (imageBlob) {
-        downloadFile(imageBlob, "snapshot.jpg");
-      }
-
       // Simulate sending to backend
       const formData = new FormData();
       formData.append("audio", audioBlob);
@@ -277,25 +258,31 @@ export default function VoiceVideoRecorder() {
         formData.append("image", imageBlob);
       }
 
-      console.log("FormData Entries:");
-      for (let [key, value] of formData.entries()) {
-        console.log(key, value);
-      }
-
       const response = await fetch(
         "http://127.0.0.1:8001/user/process_request",
         {
           method: "POST",
           body: formData,
+          timeout: 300000, // Set timeout to 60 seconds
         }
       );
 
       if (response.ok) {
+        const responseData = await response.blob();
+
+        const audioBlob = new Blob([responseData], {
+          type: "audio/wav", // Use the correct audio type (wav, mp3, etc.)
+        });
+
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        setResponseAudio(audioUrl);
         toast({
           title: "Success",
           description: "Recording sent successfully",
         });
-        resetRecording();
+        setHasRecording(false);
+        audioChunksRef.current = [];
       } else {
         throw new Error("Failed to send recording");
       }
@@ -306,7 +293,9 @@ export default function VoiceVideoRecorder() {
         description: "Failed to prepare recording",
         variant: "destructive",
       });
+      resetRecording();
     } finally {
+      setIsSending(false);
       setIsRecording(false);
     }
 
@@ -398,6 +387,34 @@ export default function VoiceVideoRecorder() {
               className="w-full"
             />
           </div>
+
+          {responseAudio && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-md">
+              <h3 className="font-medium text-sm text-gray-700 mb-2">
+                Response Audio
+              </h3>
+              <audio
+                controls
+                className="w-full"
+                src={responseAudio}
+                onError={() => {
+                  toast({
+                    title: "Error",
+                    description: "Could not play the response audio",
+                    variant: "destructive",
+                  });
+                  setResponseAudio(null);
+                }}
+              />
+              <Button
+                className="mt-3 w-full bg-gray-100 hover:bg-gray-200 text-gray-700"
+                onClick={resetRecording}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Record New Message
+              </Button>
+            </div>
+          )}
 
           {hasRecording ? (
             <div className="flex gap-2">
